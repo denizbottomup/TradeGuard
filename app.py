@@ -18,12 +18,24 @@ st.set_page_config(
 # --- CSS ---
 st.markdown("""
     <style>
+    /* Genel Stil */
     .metric-container { background-color: #0E1117; border: 1px solid #262730; border-radius: 8px; padding: 12px; text-align: center; }
     .metric-value { font-size: 22px; font-weight: 700; color: #f0f6fc; }
     .metric-label { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 5px; }
+    
+    /* Live Dot */
     .live-dot { color: #00E096; font-weight: bold; animation: pulse 2s infinite; display: inline-block; margin-right: 8px; }
     @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    
+    /* Skor */
     .big-score { font-size: 80px !important; font-weight: 900; line-height: 1; text-align: center; }
+    
+    /* Lejand Kutusu */
+    .legend-box { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 15px; font-size: 13px; color: #c9d1d9; margin-top: 15px; }
+    .legend-item { display: flex; align-items: center; margin-bottom: 8px; }
+    .legend-color { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; display: inline-block; }
+    
+    /* Chat */
     .stChatMessage { background-color: #161b22; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
@@ -59,6 +71,29 @@ btc_price, btc_change, whale, retail = get_live_metrics()
 # --- 3. ÜST HEADER ---
 st.markdown(f"### <span class='live-dot'>●</span> TradeGuard Pro <span style='font-size:14px; color:#666; font-weight:normal'>| Live Market Intelligence</span>", unsafe_allow_html=True)
 
+# --- YENİ YER: DOKÜMANTASYON EN ÜSTTE ---
+with st.expander("📚 Proje Dokümantasyonu ve AI Metodolojisi (Nasıl Çalışır?)"):
+    st.markdown("""
+    #### BottomUP TradeGuard v11.0 - Teknik Rapor
+    
+    **1. Projenin Amacı:**
+    Finansal piyasalardaki duygusal kararları (FOMO/Panic) elimine etmek ve yerine matematiksel, istatistiksel ve veri odaklı bir karar destek mekanizması sunmak.
+    
+    **2. Algoritma Mimarisi (Risk Engine):**
+    Sistem, her işlem için 0-100 arası bir Risk Skoru üretir. Ağırlıklar, makine öğrenmesi testlerine göre optimize edilmiştir:
+    * **%40 - Coin Uyumu:** Analistin o paritedeki geçmiş başarısı.
+    * **%30 - Zamanlama:** İşlem saatinin (NY/London/Asia) istatistiksel başarısı.
+    * **%20 - Analist Faktörü:** Analistin genel yetenek puanı.
+    * **%10 - Gün Faktörü:** İşlemin yapıldığı günün istatistiği.
+    
+    **3. Canlı Risk Katmanları:**
+    * **Kill Zones:** NY (16:30) ve Londra (10:00) açılışlarında likidasyon tuzağı riski varsa puan düşülür.
+    * **Tatil Modu:** ABD/İngiltere borsaları kapalıysa hacimsizlik riski eklenir.
+    * **Whale Radar:** Balinalar ve Küçük Yatırımcı zıt yöndeyse, sistem Balina tarafını tutar.
+    """)
+
+# Metrik Kartları
+st.markdown("---")
 c1, c2, c3, c4 = st.columns(4)
 def card(col, lbl, val, clr="#fff"): 
     col.markdown(f"<div class='metric-container'><div class='metric-label'>{lbl}</div><div class='metric-value' style='color:{clr}'>{val}</div></div>", unsafe_allow_html=True)
@@ -92,7 +127,6 @@ with col_input:
 
     st.caption("🗓️ Zamanlama & Market Kontrolü")
     t_col1, t_col2 = st.columns(2)
-    
     sel_date = t_col1.date_input("Tarih", st.session_state.static_now)
     sel_time = t_col2.time_input("Saat (TRT)", st.session_state.static_now.time())
     
@@ -120,14 +154,15 @@ with col_result:
     sc_col, det_col = st.columns([1, 1])
     
     with sc_col:
-        if score < 40: clr, lbl = "#FF4B4B", "RİSKLİ"
-        elif score > 65: clr, lbl = "#00E096", "FIRSAT"
-        else: clr, lbl = "#FFD166", "NÖTR"
+        if score < 40: clr, lbl = "#FF4B4B", "YÜKSEK RİSK"
+        elif score > 65: clr, lbl = "#00E096", "GÜÇLÜ FIRSAT"
+        else: clr, lbl = "#FFD166", "NÖTR / İZLE"
         
         st.markdown(f"<div class='big-score' style='color:{clr}'>{score}</div>", unsafe_allow_html=True)
         st.markdown(f"<div style='text-align:center; background:{clr}22; color:{clr}; padding:8px; border-radius:8px; font-weight:bold'>{lbl}</div>", unsafe_allow_html=True)
         
     with det_col:
+        # Uyarı Kartları
         if d['trap_alert']: st.error(d['trap_alert'])
         else: st.success(f"✅ Zamanlama Güvenli ({sel_time.strftime('%H:%M')})")
         
@@ -139,7 +174,15 @@ with col_result:
                 if "SMART" in d['whale_alert']: st.info(d['whale_alert'])
                 else: st.error(d['whale_alert'])
                 
-        st.caption(f"İstatistik: {sel_analyst} | {sel_coin} | Başarı: {d['base_stats']['coin']}")
+        # --- YENİ YER: LEJAND VE AÇIKLAMA ---
+        st.markdown("""
+        <div class="legend-box">
+            <div style="font-weight:bold; margin-bottom:10px; border-bottom:1px solid #333; padding-bottom:5px;">ℹ️ RİSK SKORU LEJANDI</div>
+            <div class="legend-item"><span class="legend-color" style="background:#00E096"></span> <b>66 - 100:</b> Güçlü Fırsat (İstatistik & Trend Uyumlu)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#FFD166"></span> <b>41 - 65:</b> Nötr Bölge (Belirsizlik Hakim)</div>
+            <div class="legend-item"><span class="legend-color" style="background:#FF4B4B"></span> <b>0 - 40:</b> Yüksek Risk (Tuzak veya Ters Trend)</div>
+        </div>
+        """, unsafe_allow_html=True)
 
 # --- 5. CHATBOT ---
 st.divider()
@@ -162,41 +205,3 @@ if prompt:
     time.sleep(0.5)
     st.chat_message("assistant").write(ai_resp)
     st.session_state.messages.append({"role":"assistant", "content":ai_resp})
-
-# --- 6. TEKNİK DOKÜMANTASYON & WHITEPAPER (YENİ EKLENEN KISIM) ---
-st.markdown("---")
-with st.expander("📚 Proje Dokümantasyonu ve AI Metodolojisi (Whitepaper) - Oku"):
-    st.markdown("""
-    ### BottomUP TradeGuard v11.0 - Teknik Rapor
-    
-    **1. Projenin Amacı:**
-    Bu yazılım, finansal piyasalardaki duygusal kararları (FOMO/Panic) elimine etmek ve yerine matematiksel, istatistiksel ve veri odaklı bir karar destek mekanizması sunmak için BottomUP tarafından geliştirilmiştir.
-    
-    **2. Yapay Zeka (AI) Model Eğitimi ve Bulgular:**
-    Geliştirme aşamasında Google Colab ortamında Python (Pandas/Scikit-Learn) kullanılarak binlerce satırlık geçmiş işlem verisi analiz edilmiştir. 
-    * **Keşif:** Yapılan analizlerde, bir işlemin başarısında "Analistin Kim Olduğu"ndan çok, "Hangi Coin'de" ve "Hangi Saatte" işlem açtığının daha belirleyici olduğu saptanmıştır.
-    * **Veri:** Model, `latest_setup.csv` dosyasındaki geçmiş başarı/başarısızlık etiketlerini kullanarak eğitilmiştir.
-    * **Doğrulama:** AI modelinin "Görmediği Veri" (Blind Test) üzerindeki başarısı, piyasa ortalamasının %30 üzerinde çıkmıştır.
-    
-    **3. Algoritma Mimarisi (Scoring Engine):**
-    Sistem, her işlem için 0 ile 100 arasında bir Risk Skoru üretir. Bu skorun hesaplanmasında kullanılan ağırlıklar, AI analiz sonuçlarına göre optimize edilmiştir:
-    
-    * **%40 - Coin Uyumu (Coin_WR):** Analistin o paritedeki geçmiş başarısı.
-    * **%30 - Zamanlama (Session_WR):** O saat dilimindeki (New York, Londra, Asya) başarı oranı.
-    * **%20 - Analist Faktörü (Global_WR):** Analistin genel yetenek puanı.
-    * **%10 - Gün Faktörü (Day_WR):** İşlemin yapıldığı günün istatistiği.
-    
-    **4. Dinamik Piyasa Filtreleri (Real-Time Layers):**
-    Statik puanın üzerine, anlık piyasa koşulları eklenerek nihai karar verilir:
-    * **Kill Zones (Tuzak Bölgeleri):** New York (16:30) ve Londra (10:00) açılışlarında likidasyon tuzağı riski tespit edilirse puan düşülür.
-    * **Market Holidays (Tatil Modu):** `holidays` kütüphanesi ile ABD ve İngiltere resmi tatilleri kontrol edilir. Tatil günlerinde hacimsizlik nedeniyle risk puanı artırılır.
-    * **Whale Radar (Balina Verisi):** Binance Futures API üzerinden "Top Trader Long/Short Ratio" çekilir. Küçük yatırımcı (Retail) ve Balinalar (Smart Money) ters yöndeyse, sistem Balina tarafını tutar.
-    
-    **5. Teknoloji Yığını:**
-    * **Core:** Python 3.9
-    * **Data Analysis:** Pandas, NumPy
-    * **API:** Binance US (Spot), Binance Futures (Derivatives), Holidays Library
-    * **Frontend:** Streamlit Cloud
-    
-    *Geliştirici: BottomUP AI Team | Sürüm: v11.0 Final*
-    """)
