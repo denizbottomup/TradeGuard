@@ -7,196 +7,184 @@ import os
 import time
 from tradeguard_engine import TradeGuardAI
 
-# --- SAYFA YAPISI ---
+# --- SAYFA AYARLARI ---
 st.set_page_config(
-    page_title="TradeGuard AI Chat", 
-    page_icon="🤖", 
+    page_title="TradeGuard Pro Terminal", 
+    page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CSS ---
+# --- CSS (PROFESYONEL TASARIM) ---
 st.markdown("""
     <style>
-    .metric-container { background-color: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 10px; text-align: center; }
-    .metric-value { font-size: 20px; font-weight: 700; color: #f0f6fc; }
-    .metric-label { font-size: 11px; color: #8b949e; text-transform: uppercase; }
-    .chat-user { background-color: #2b3137; padding: 10px; border-radius: 10px; margin-bottom: 10px; text-align: right; }
-    .chat-ai { background-color: #0d1117; padding: 15px; border-radius: 10px; border-left: 4px solid #00E096; margin-bottom: 10px; }
+    /* Metric Kartları */
+    .metric-container { background-color: #0E1117; border: 1px solid #262730; border-radius: 8px; padding: 12px; text-align: center; }
+    .metric-value { font-size: 22px; font-weight: 700; color: #f0f6fc; }
+    .metric-label { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 5px; }
+    
+    /* Canlı Dot Animasyonu */
+    @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+    .live-dot { color: #00E096; font-weight: bold; animation: pulse 2s infinite; display: inline-block; margin-right: 8px; }
+    
+    /* Büyük Skor */
+    .big-score { font-size: 80px !important; font-weight: 900; line-height: 1; text-align: center; }
+    
+    /* Chat */
+    .stChatMessage { background-color: #161b22; border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- MOTORU YÜKLE ---
+# --- 1. MOTORU YÜKLE ---
 @st.cache_resource
 def load_engine():
     current_dir = os.path.dirname(os.path.abspath(__file__))
+    # GitHub dosya yollarını tara
     for name in ["latest_setup.csv", "data.csv"]:
         path = os.path.join(current_dir, name)
         if os.path.exists(path): return TradeGuardAI(path)
     return None
 
 engine = load_engine()
-if not engine: st.error("CSV Dosyası Yok! Lütfen GitHub'a 'latest_setup.csv' yükleyin."); st.stop()
+if not engine: st.error("⚠️ CSV Dosyası Yok! Lütfen GitHub'a 'latest_setup.csv' yükleyin."); st.stop()
 
-# --- NLP PARSER ---
-def parse_user_prompt(prompt, available_coins):
-    prompt = prompt.lower()
-    position = "long"
-    if "short" in prompt or "düşer" in prompt or "satış" in prompt: position = "short"
-    
-    selected_coin = "BTC/USDT"
-    coin_map = {"btc": "BTC/USDT", "bitcoin": "BTC/USDT", "eth": "ETH/USDT", "ethereum": "ETH/USDT", "sol": "SOL/USDT"}
-    
-    for k, v in coin_map.items():
-        if k in prompt: selected_coin = v; break
-    
-    for c in available_coins:
-        if c.split("/")[0].lower() in prompt: selected_coin = c; break
-
-    return selected_coin, position
-
-# --- CANLI VERİ (ABD SUNUCUSU UYUMLU) ---
+# --- 2. CANLI VERİ (ABD DOSTU) ---
 def get_live_metrics():
-    """
-    Streamlit Cloud (US) uyumlu veri çekme fonksiyonu.
-    Binance Global US IP'lerini engellediği için alternatif endpointler dener.
-    """
-    price, change, whale = 0, 0, 0.5
-    debug_log = []
-
-    # 1. FİYAT VE TREND (Binance US Kullan - ABD Dostu)
     try:
-        # Not: Binance US'de parite BTCUSD olarak geçer (USDT değil)
-        url = "https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT" 
-        res = requests.get(url, timeout=3)
+        # Fiyat (Binance US - IP Bloklamaz)
+        res = requests.get("https://api.binance.us/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=2).json()
+        price, change = float(res['lastPrice']), float(res['priceChangePercent'])
         
-        if res.status_code == 200:
-            data = res.json()
-            price = float(data['lastPrice'])
-            change = float(data['priceChangePercent'])
-        else:
-            debug_log.append(f"Spot API Hatası: {res.status_code}")
-            # Yedek: CoinGecko (Çok daha güvenli ama yavaş)
-            url_cg = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true"
-            res_cg = requests.get(url_cg, timeout=3).json()
-            price = res_cg['bitcoin']['usd']
-            change = res_cg['bitcoin']['usd_24h_change']
+        # Balina (Futures Global - Try/Except ile)
+        try:
+            w_res = requests.get("https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=2).json()
+            whale = float(w_res[0]['longAccount'])
+            r_res = requests.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=2).json()
+            retail = float(r_res[0]['longAccount'])
+        except: whale, retail = 0.5, 0.5
+        
+        return price, change, whale, retail
+    except: return 0, 0, 0.5, 0.5
 
-    except Exception as e:
-        debug_log.append(f"Fiyat Çekilemedi: {str(e)}")
+btc_price, btc_change, whale, retail = get_live_metrics()
 
-    # 2. BALİNA VERİSİ (Binance Futures)
-    # ABD sunucuları fapi.binance.com'a erişemez.
-    # Bu yüzden veri gelmezse Nötr (0.5) dönüp kullanıcıyı yanıltmayız.
-    try:
-        url_fut = "https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1"
-        res_fut = requests.get(url_fut, timeout=2)
-        if res_fut.status_code == 200:
-            whale = float(res_fut.json()[0]['longAccount'])
-        else:
-            debug_log.append("Futures API Bloklandı (US IP)")
-            whale = 0.5 # Nötr Varsay
-    except Exception as e:
-        debug_log.append(f"Whale Data Hatası: {str(e)}")
-        whale = 0.5
+# --- 3. ÜST HEADER ---
+st.markdown(f"### <span class='live-dot'>●</span> TradeGuard Pro <span style='font-size:14px; color:#666; font-weight:normal'>| Live Market Intelligence</span>", unsafe_allow_html=True)
 
-    return price, change, whale, debug_log
-
-# Verileri Çek
-btc_price, btc_change, whale_ratio, logs = get_live_metrics()
-
-# --- UI BAŞLANGIÇ ---
-st.title("🤖 BottomUP TradeGuard AI")
-
-# DEBUG PANELİ (Eğer veri 0 geliyorsa burayı açıp hatayı görebilirsiniz)
-with st.expander("🔌 Bağlantı Durumu & Debug Logları"):
-    if btc_price > 0:
-        st.success(f"✅ Fiyat Verisi Başarıyla Alındı: ${btc_price}")
-    else:
-        st.error("❌ Fiyat Verisi Alınamadı!")
-    
-    if logs:
-        st.write("Hata Günlüğü:", logs)
-    else:
-        st.write("Sistem sorunsuz çalışıyor.")
-
-# Üst Bilgi Barı
+# 4'lü Metrik Kartı
 c1, c2, c3, c4 = st.columns(4)
-def mini_card(col, lbl, val, clr="#fff"):
+def card(col, lbl, val, clr="#fff"): 
     col.markdown(f"<div class='metric-container'><div class='metric-label'>{lbl}</div><div class='metric-value' style='color:{clr}'>{val}</div></div>", unsafe_allow_html=True)
 
 p_clr = "#00E096" if btc_change > 0 else "#FF4B4B"
-mini_card(c1, "BTC Fiyat", f"${btc_price:,.0f}", p_clr)
-mini_card(c2, "Trend (24s)", f"%{btc_change:.2f}", p_clr)
-mini_card(c3, "Balina Sentiment", f"%{whale_ratio*100:.1f} Long", "#7C3AED")
-mini_card(c4, "AI Modeli", "v11.0 Active", "#F3BA2F")
+card(c1, "BTC Fiyat", f"${btc_price:,.0f}", p_clr)
+card(c2, "24s Değişim", f"%{btc_change:.2f}", p_clr)
+card(c3, "Balina Sentiment", f"%{whale*100:.0f} Long", "#7C3AED")
+card(c4, "Aktif Trader", f"{engine.active_trader_count} Kişi", "#F3BA2F")
 
 st.markdown("---")
 
-# --- SIDEBAR ---
-st.sidebar.header("👤 Trader Profili")
-analysts = sorted(list(engine.db['global'].keys()))
-active_analyst = st.sidebar.selectbox("Sen Kimsin?", analysts)
-st.sidebar.info(f"Hoşgeldin {active_analyst}, senin geçmiş verilerini yükledim.")
+# --- 4. SİMÜLATÖR PANELİ (SOL: GİRDİ, SAĞ: SONUÇ) ---
+col_input, col_result = st.columns([1, 2])
 
-# --- CHAT ARAYÜZÜ ---
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+with col_input:
+    st.subheader("🛠️ Parametreler")
+    
+    # TRADER & COIN (Search Box)
+    analysts = sorted(list(engine.db['global'].keys()))
+    coins = sorted(list(set([k[1] for k in engine.db['coin'].keys()])))
+    
+    sel_analyst = st.selectbox("Analist Ara", analysts, index=0)
+    sel_coin = st.selectbox("Coin Ara", coins, index=0)
+    sel_pos = st.selectbox("Yön", ["long", "short"], format_func=lambda x: "LONG 📈" if x=="long" else "SHORT 📉")
+    
+    st.divider()
+    
+    # ZAMANLAMA (AYRIŞTIRILMIŞ)
+    st.caption("🗓️ Zamanlama & Market Kontrolü")
+    
+    # Tarih ve Saat yan yana
+    t_col1, t_col2 = st.columns(2)
+    sel_date = t_col1.date_input("Tarih", datetime.now())
+    sel_time = t_col2.time_input("Saat (TRT)", datetime.now().time())
+    
+    current_dt = datetime.combine(sel_date, sel_time)
+    
+    # Market Tatil Kontrolü (Hemen Göster)
+    market_code, market_msg = engine.check_market_status(current_dt)
+    
+    if market_code == "OPEN":
+        st.success(f"✅ {market_msg}")
+    elif market_code == "WEEKEND":
+        st.warning(f"⚠️ {market_msg}")
+    else:
+        st.error(f"⛔ {market_msg}")
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+with col_result:
+    # HESAPLAMA MOTORU ÇAĞRISI
+    res = engine.predict_risk(
+        analyst=sel_analyst, coin=sel_coin, trade_time_trt=current_dt, position=sel_pos,
+        live_btc_change=btc_change, whale_top_ratio=whale, whale_global_ratio=retail
+    )
+    
+    score = res['score']
+    d = res['details']
+    
+    # SKOR GÖRSELİ
+    st.subheader("🧠 Yapay Zeka Kararı")
+    
+    sc_col, det_col = st.columns([1, 1])
+    
+    with sc_col:
+        # Renk ve Etiket
+        if score < 40: clr, lbl = "#FF4B4B", "RİSKLİ"
+        elif score > 65: clr, lbl = "#00E096", "FIRSAT"
+        else: clr, lbl = "#FFD166", "NÖTR"
+        
+        st.markdown(f"<div class='big-score' style='color:{clr}'>{score}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align:center; background:{clr}22; color:{clr}; padding:8px; border-radius:8px; font-weight:bold'>{lbl}</div>", unsafe_allow_html=True)
+        
+    with det_col:
+        # Uyarı Kartları
+        if d['trap_alert']: st.error(d['trap_alert'])
+        else: st.success(f"✅ Zamanlama Güvenli ({sel_time.strftime('%H:%M')})")
+        
+        if d['trend_alert']: 
+            if "TERSİ" in d['trend_alert']: st.warning(d['trend_alert'])
+            else: st.success(d['trend_alert'])
+            
+        if d['whale_alert']:
+                if "SMART" in d['whale_alert']: st.info(d['whale_alert'])
+                else: st.error(d['whale_alert'])
+                
+        st.caption(f"İstatistik: {sel_analyst} | {sel_coin} | Başarı: {d['base_stats']['coin']}")
 
-# --- KULLANICI GİRİŞİ ---
-prompt = st.chat_input("AI'ya sor: Örn: 'Şu an BTC Long açsam başarılı olur muyum?'")
+# --- 5. CHATBOT (ALTTA) ---
+st.divider()
+st.subheader("💬 AI Asistan")
+
+if "messages" not in st.session_state: st.session_state.messages = []
+for m in st.session_state.messages: st.chat_message(m["role"]).write(m["content"])
+
+prompt = st.chat_input("Örn: Şu an işlem açmak mantıklı mı?")
 
 if prompt:
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    with st.spinner(f'{active_analyst} verileri analiz ediliyor...'):
-        time.sleep(0.5)
-        
-        # NLP & HESAPLAMA
-        # Coin listesini temizle
-        clean_coins = list(set([k[1] for k in engine.db['coin'].keys()]))
-        target_coin, target_pos = parse_user_prompt(prompt, clean_coins)
-        
-        res = engine.predict_risk(
-            analyst=active_analyst,
-            coin=target_coin,
-            trade_time_trt=datetime.now(),
-            position=target_pos,
-            live_btc_change=btc_change,
-            whale_top_ratio=whale_ratio
-        )
-        
-        score = res['score']
-        dets = res['details']
-
-        # CEVAP OLUŞTURMA
-        if score > 65:
-            intro = f"🚀 **Evet {active_analyst}, şartlar {target_pos.upper()} işlemi için harika!**"
-            color = "green"
-        elif score < 40:
-            intro = f"⛔ **Hayır, şu an beklemeni öneririm {active_analyst}.**"
-            color = "red"
-        else:
-            intro = f"⚠️ **Durum nötr.** İşlem açabilirsin ama riskli."
-            color = "orange"
-            
-        analysis_text = f"""
-        Bu işlem için **Başarı Skorun: :{color}[{score}/100]**.
-        
-        **Neden bu puan?**
-        1. **Geçmiş İstatistik:** {target_coin} paritesindeki başarın **{dets['base_stats']['coin']}**.
-        2. **Zamanlama:** {dets['trap_alert'] if dets['trap_alert'] else "Şu an güvenli bir saat dilimi."}
-        3. **Piyasa:** {dets['trend_alert'] if dets['trend_alert'] else "Trend yatay seyrediyor."}
-        """
-
-    with st.chat_message("assistant"):
-        st.markdown(intro)
-        st.markdown(analysis_text)
+    st.chat_message("user").write(prompt)
+    st.session_state.messages.append({"role":"user", "content":prompt})
     
-    st.session_state.messages.append({"role": "assistant", "content": intro + "\n" + analysis_text})
+    # Chat Cevabı (Simülatördeki seçili verileri kullanır)
+    ai_resp = f"""
+    **Analiz Raporu ({sel_analyst} - {sel_coin}):**
+    
+    Skorun **{score}/100**.
+    
+    1. **Market Durumu:** {d['market_status']}
+    2. **Zamanlama:** {d['trap_alert'] if d['trap_alert'] else 'Güvenli bölge.'}
+    3. **Trend:** {d['trend_alert'] if d['trend_alert'] else 'Yatay seyir.'}
+    
+    Bu şartlar altında {lbl} görünüyor.
+    """
+    
+    time.sleep(0.5)
+    st.chat_message("assistant").write(ai_resp)
+    st.session_state.messages.append({"role":"assistant", "content":ai_resp})
