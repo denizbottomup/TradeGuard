@@ -6,181 +6,173 @@ from datetime import datetime
 import os
 from tradeguard_engine import TradeGuardAI
 
-# --- SAYFA AYARLARI ---
+# --- SAYFA YAPISI ---
 st.set_page_config(
-    page_title="TradeGuard AI v11", 
+    page_title="TradeGuard Live", 
     page_icon="🛡️", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- CSS STİL (GÖRSELLEŞTİRME) ---
+# --- CSS (CANLI GÖRÜNÜM & ANİMASYON) ---
 st.markdown("""
     <style>
-    .big-score { font-size: 70px !important; font-weight: 900; line-height: 1; }
-    .score-label { font-size: 14px; letter-spacing: 2px; color: #888; margin-bottom: 5px; }
-    .badge { padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; margin-top: 10px; }
-    .stMetric { background-color: #0E1117; padding: 10px; border-radius: 10px; border: 1px solid #262730; }
+    /* Canlı İndikatörü */
+    @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+    .live-indicator { color: #00E096; font-weight: bold; animation: blink 2s infinite; display: inline-block; margin-right: 10px; }
+    
+    /* Skor Kartları */
+    .big-score { font-size: 80px !important; font-weight: 900; line-height: 1; text-align: center; }
+    .metric-card { background: #0E1117; padding: 15px; border-radius: 10px; border: 1px solid #333; text-align: center; }
+    .metric-val { font-size: 24px; font-weight: bold; color: #fff; }
+    .metric-label { font-size: 12px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. DOSYA YOLU VE MOTOR BAŞLATMA ---
+# --- 1. MOTORU BAŞLAT ---
 @st.cache_resource
 def load_engine():
-    # Dosya ismini standartlaştırıyoruz: "latest_setup.csv"
-    # Bu kod, app.py ile aynı klasördeki dosyayı arar.
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Olası dosya isimlerini kontrol et
-    possible_names = ["latest_setup.csv", "data.csv"]
-    csv_path = None
-    
-    for name in possible_names:
-        temp_path = os.path.join(current_dir, name)
-        if os.path.exists(temp_path):
-            csv_path = temp_path
-            break
-            
-    if csv_path:
-        return TradeGuardAI(csv_path)
+    # Olası isimleri tara
+    for name in ["latest_setup.csv", "data.csv"]:
+        path = os.path.join(current_dir, name)
+        if os.path.exists(path):
+            return TradeGuardAI(path)
     return None
 
-# Motoru Yükle
 engine = load_engine()
 
-# --- HATA YÖNETİMİ (DOSYA YOKSA) ---
 if engine is None:
-    st.error("⚠️ CSV Dosyası Bulunamadı!")
-    st.info("Lütfen GitHub'a yüklediğiniz CSV dosyasının adını **'latest_setup.csv'** olarak değiştirin.")
-    
-    # Geçici Yükleme Ekranı (Debug için)
-    uploaded_file = st.file_uploader("Veya buradan manuel yükleyin:", type="csv")
-    if uploaded_file:
-        with open("latest_setup.csv", "wb") as f:
-            f.write(uploaded_file.getbuffer())
-        st.rerun()
+    st.error("⚠️ Veri Bulunamadı! GitHub'a 'latest_setup.csv' yükleyin.")
     st.stop()
-else:
-    st.sidebar.success(f"✅ Sistem Aktif (v11.0)")
 
-# --- 2. CANLI VERİ (BINANCE) ---
-def get_live_data():
+# --- 2. CANLI VERİ ÇEK (TÜM DATALAR) ---
+def get_live_metrics():
     try:
-        # Spot Price
-        res_spot = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=5).json()
+        # Spot Fiyat
+        res_spot = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=2).json()
         price = float(res_spot['lastPrice'])
         change = float(res_spot['priceChangePercent'])
         
-        # Futures Whale Data (Public API)
-        # Not: Public API bazen veri vermeyebilir, bu durumda nötr (0.5) döneriz.
+        # Vadeli (Whale/Retail)
         try:
-            res_top = requests.get("https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=5).json()
-            whale_ratio = float(res_top[0]['longAccount'])
+            res_top = requests.get("https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=2).json()
+            whale = float(res_top[0]['longAccount'])
             
-            res_glob = requests.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=5).json()
-            retail_ratio = float(res_glob[0]['longAccount'])
+            res_glob = requests.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=2).json()
+            retail = float(res_glob[0]['longAccount'])
         except:
-            whale_ratio, retail_ratio = 0.5, 0.5 # Veri yoksa Nötr
+            whale, retail = 0.5, 0.5 # Veri gelmezse nötr
             
-        return price, change, whale_ratio, retail_ratio
+        return price, change, whale, retail
     except:
         return 0, 0, 0.5, 0.5
 
-btc_price, btc_change, whale_long, retail_long = get_live_data()
+# Verileri çek
+btc_price, btc_change, whale_ratio, retail_ratio = get_live_metrics()
 
-# --- 3. SIDEBAR (KULLANICI GİRİŞLERİ) ---
-st.sidebar.header("⚡ Simülatör")
+# --- 3. BAŞLIK & CANLI DATA PANELI ---
+st.markdown(f"""
+    ## <span class='live-indicator'>●</span> BottomUP TradeGuard <span style='font-size:14px; color:#666; font-weight:normal'>| Canlı Piyasa Bağlantısı Aktif</span>
+""", unsafe_allow_html=True)
 
+# 4'lü Canlı Veri Paneli
+col1, col2, col3, col4 = st.columns(4)
+
+def metric_box(col, label, value, color="#fff"):
+    col.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-val" style="color:{color}">{value}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+# Renk Ayarları
+p_color = "#00E096" if btc_change > 0 else "#FF4B4B"
+metric_box(col1, "BTC Fiyat", f"${btc_price:,.0f}", p_color)
+metric_box(col2, "24s Değişim", f"%{btc_change:.2f}", p_color)
+metric_box(col3, "Balina (Top Trader)", f"%{whale_ratio*100:.1f} Long", "#7C3AED") # Mor
+metric_box(col4, "Retail (Global)", f"%{retail_ratio*100:.1f} Long", "#F3BA2F") # Sarı
+
+st.markdown("---")
+
+# --- 4. SİMÜLATÖR (SIDEBAR) ---
+st.sidebar.header("🔍 Analiz Filtreleri")
+st.sidebar.info(f"Son 6 ayda aktif olan **{engine.active_trader_count}** trader listeleniyor.")
+
+# Arama Özellikli Kutular (Selectbox native olarak aramayı destekler)
 analysts = sorted(list(engine.db['global'].keys()))
-# Coin listesini temizle
+# Coinleri temizle ve sırala
 coins = sorted(list(set([k[1] for k in engine.db['coin'].keys()])))
 
-sel_analyst = st.sidebar.selectbox("Analist Seç", analysts)
-sel_coin = st.sidebar.selectbox("Coin Paritesi", coins)
-sel_pos = st.sidebar.selectbox("İşlem Yönü", ["long", "short"], format_func=lambda x: "LONG (Yükseliş)" if x=="long" else "SHORT (Düşüş)")
-sel_time = st.sidebar.time_input("İşlem Saati (TRT)", datetime.now().time())
+sel_analyst = st.sidebar.selectbox("Analist Ara/Seç", analysts, index=0, placeholder="Yazmaya başlayın...")
+sel_coin = st.sidebar.selectbox("Coin Ara/Seç", coins, index=0, placeholder="Yazmaya başlayın...")
+sel_pos = st.sidebar.selectbox("Yön", ["long", "short"], format_func=lambda x: "LONG 📈" if x=="long" else "SHORT 📉")
 
-# --- 4. ANA EKRAN ---
-st.title("🛡️ BottomUP TradeGuard")
-st.markdown(f"**Live Engine Status:** Connected to Binance | **Model:** AI-Driven v11.0")
+st.sidebar.markdown("---")
+sel_date = st.sidebar.date_input("Tarih", datetime.now())
+sel_time = st.sidebar.time_input("Saat", datetime.now().time())
+current_dt = datetime.combine(sel_date, sel_time)
 
-# Metrik Kartları
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("BTC Fiyat", f"${btc_price:,.0f}", f"{btc_change:.2f}%")
-c2.metric("Balina (Long)", f"%{whale_long*100:.1f}", delta_color="off")
-c3.metric("Retail (Long)", f"%{retail_long*100:.1f}", delta_color="off")
-c4.metric("Model Verisi", f"{len(engine.db['global'])} Analist")
-
-# --- 5. RİSK HESAPLAMA ---
-current_dt = datetime.combine(datetime.today(), sel_time)
-
-# Engine'i çağır
+# --- 5. HESAPLAMA MOTORU ---
 result = engine.predict_risk(
     analyst=sel_analyst,
     coin=sel_coin,
     trade_time_trt=current_dt,
     position=sel_pos,
     live_btc_change=btc_change,
-    whale_top_ratio=whale_long,
-    whale_global_ratio=retail_long
+    whale_top_ratio=whale_ratio,
+    whale_global_ratio=retail_ratio
 )
 
 score = result['score']
 details = result['details']
 
-# --- 6. SONUÇ GÖRSELLEŞTİRME ---
-st.markdown("---")
+# --- 6. SONUÇ EKRANI ---
+c_score, c_detay = st.columns([1, 2])
 
-col_score, col_details = st.columns([1, 2])
-
-with col_score:
-    st.markdown("<div style='text-align:center' class='score-label'>BAŞARI OLASILIĞI</div>", unsafe_allow_html=True)
+with c_score:
+    st.markdown("<div style='text-align:center; color:#666; letter-spacing:1px; margin-bottom:10px'>BAŞARI OLASILIĞI</div>", unsafe_allow_html=True)
     
-    # Renk Kodları
     if score < 40:
-        color = "#FF4B4B" # Kırmızı
-        bg_color = "rgba(255, 75, 75, 0.1)"
-        label = "YÜKSEK RİSK"
+        clr = "#FF4B4B"; lbl = "YÜKSEK RİSK ⛔"
     elif score > 65:
-        color = "#00E096" # Yeşil
-        bg_color = "rgba(0, 224, 150, 0.1)"
-        label = "GÜÇLÜ FIRSAT"
+        clr = "#00E096"; lbl = "GÜÇLÜ FIRSAT 🚀"
     else:
-        color = "#FFD166" # Sarı
-        bg_color = "rgba(255, 209, 102, 0.1)"
-        label = "NÖTR / İZLE"
+        clr = "#FFD166"; lbl = "NÖTR / İZLE ⚠️"
+        
+    st.markdown(f"<div class='big-score' style='color:{clr}'>{score}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center; background:{clr}22; color:{clr}; padding:8px; border-radius:8px; font-weight:bold; margin-top:10px'>{lbl}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center; font-size:11px; color:#555; margin-top:20px'>Son Güncelleme: {datetime.now().strftime('%H:%M:%S')}</div>", unsafe_allow_html=True)
 
-    st.markdown(f"<div style='text-align:center; color:{color}' class='big-score'>{score}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div style='text-align:center'><span class='badge' style='background:{bg_color}; color:{color}'>{label}</span></div>", unsafe_allow_html=True)
-
-with col_details:
-    st.subheader("🧠 Yapay Zeka Analiz Raporu")
+with c_detay:
+    st.subheader("📋 Yapay Zeka Raporu")
     
     # Uyarılar
-    if details['trap_alert']:
-        st.error(f"🕰️ {details['trap_alert']}")
-    
+    if details['trap_alert']: st.error(details['trap_alert'])
+    else: st.success("✅ Zamanlama Güvenli (Likidasyon Bölgesi Dışı)")
+
     if details['trend_alert']:
-        if "TERSİ" in details['trend_alert']: st.warning(f"📉 {details['trend_alert']}")
-        else: st.success(f"🚀 {details['trend_alert']}")
-        
+        if "TERSİ" in details['trend_alert']: st.warning(details['trend_alert'])
+        else: st.success(details['trend_alert'])
+
     if details['whale_alert']:
-        if "SMART" in details['whale_alert']: st.info(f"🐋 {details['whale_alert']}")
-        else: st.error(f"⚠️ {details['whale_alert']}")
-        
+        if "SMART" in details['whale_alert']: st.info(details['whale_alert'])
+        else: st.error(details['whale_alert'])
+
     st.markdown("---")
-    # İstatistik Detayı
-    s1, s2 = st.columns(2)
-    s1.info(f"**Coin Uyumu:** {details['base_stats']['coin']}")
-    s2.info(f"**Seans Uyumu:** {details['base_stats']['session']}")
+    # İstatistikler
+    col_s1, col_s2 = st.columns(2)
+    col_s1.metric("Geçmiş Coin Başarısı", details['base_stats']['coin'])
+    col_s2.metric("Geçmiş Seans Başarısı", details['base_stats']['session'])
 
 # --- 7. GRAFİK ---
 st.markdown("---")
-st.caption("Model Karar Ağırlıkları (Backtest Optimize)")
-
-labels = ['Coin Uyumu (%40)', 'Zamanlama (%30)', 'Analist (%20)', 'Gün (%10)', 'Canlı Sinyaller (Dynamic)']
-values = [40, 30, 20, 10, 25] # Dinamik sinyaller ekstra etki eder
-
-fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=['#2DE1FC', '#FF4B4B', '#F3BA2F', '#A0A0A0', '#7C3AED'])])
-fig.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0), paper_bgcolor='rgba(0,0,0,0)', font_color='#888')
+fig = go.Figure(data=[go.Pie(
+    labels=['Coin Uyumu (%40)', 'Zamanlama (%30)', 'Analist (%20)', 'Gün (%10)', 'Canlı Sinyaller'],
+    values=[40, 30, 20, 10, 25],
+    hole=.6,
+    marker_colors=['#2DE1FC', '#FF4B4B', '#F3BA2F', '#A0A0A0', '#7C3AED']
+)])
+fig.update_layout(height=200, margin=dict(t=0, b=0, l=0, r=0), paper_bgcolor='rgba(0,0,0,0)', font_color='#888', showlegend=False)
 st.plotly_chart(fig, use_container_width=True)
