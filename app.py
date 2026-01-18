@@ -1,89 +1,121 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
 import requests
-from tradeguard_engine import TradeGuardAI
 import plotly.graph_objects as go
+from datetime import datetime
+import os
+from tradeguard_engine import TradeGuardAI
 
 # --- SAYFA AYARLARI ---
-st.set_page_config(page_title="TradeGuard AI v11", page_icon="🛡️", layout="wide")
+st.set_page_config(
+    page_title="TradeGuard AI v11", 
+    page_icon="🛡️", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- STİL (CSS) ---
+# --- CSS STİL (GÖRSELLEŞTİRME) ---
 st.markdown("""
     <style>
-    .big-font { font-size:60px !important; font-weight: 800; color: #F3BA2F; }
-    .risk-badge { padding: 5px 10px; border-radius: 5px; font-weight: bold; }
+    .big-score { font-size: 70px !important; font-weight: 900; line-height: 1; }
+    .score-label { font-size: 14px; letter-spacing: 2px; color: #888; margin-bottom: 5px; }
+    .badge { padding: 8px 16px; border-radius: 8px; font-weight: bold; font-size: 14px; display: inline-block; margin-top: 10px; }
+    .stMetric { background-color: #0E1117; padding: 10px; border-radius: 10px; border: 1px solid #262730; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 1. VERİ MOTORUNU BAŞLAT ---
+# --- 1. DOSYA YOLU VE MOTOR BAŞLATMA ---
 @st.cache_resource
 def load_engine():
-    # CSV dosyasının github'da veya aynı klasörde olması lazım
-    return TradeGuardAI("latest_setup.csv") 
+    # Dosya ismini standartlaştırıyoruz: "latest_setup.csv"
+    # Bu kod, app.py ile aynı klasördeki dosyayı arar.
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # Olası dosya isimlerini kontrol et
+    possible_names = ["latest_setup.csv", "data.csv"]
+    csv_path = None
+    
+    for name in possible_names:
+        temp_path = os.path.join(current_dir, name)
+        if os.path.exists(temp_path):
+            csv_path = temp_path
+            break
+            
+    if csv_path:
+        return TradeGuardAI(csv_path)
+    return None
 
-try:
-    engine = load_engine()
-    st.sidebar.success("✅ AI Motoru Hazır (v11.0)")
-except:
-    st.error("CSV Dosyası Bulunamadı! Lütfen 'latest_setup.csv' dosyasını yükleyin.")
-    uploaded_file = st.sidebar.file_uploader("CSV Yükle", type="csv")
+# Motoru Yükle
+engine = load_engine()
+
+# --- HATA YÖNETİMİ (DOSYA YOKSA) ---
+if engine is None:
+    st.error("⚠️ CSV Dosyası Bulunamadı!")
+    st.info("Lütfen GitHub'a yüklediğiniz CSV dosyasının adını **'latest_setup.csv'** olarak değiştirin.")
+    
+    # Geçici Yükleme Ekranı (Debug için)
+    uploaded_file = st.file_uploader("Veya buradan manuel yükleyin:", type="csv")
     if uploaded_file:
         with open("latest_setup.csv", "wb") as f:
             f.write(uploaded_file.getbuffer())
-        st.experimental_rerun()
+        st.rerun()
     st.stop()
+else:
+    st.sidebar.success(f"✅ Sistem Aktif (v11.0)")
 
-# --- 2. CANLI VERİ ÇEK (BINANCE) ---
+# --- 2. CANLI VERİ (BINANCE) ---
 def get_live_data():
     try:
         # Spot Price
-        res_spot = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT").json()
+        res_spot = requests.get("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT", timeout=5).json()
         price = float(res_spot['lastPrice'])
         change = float(res_spot['priceChangePercent'])
         
         # Futures Whale Data (Public API)
-        res_top = requests.get("https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1").json()
-        whale_ratio = float(res_top[0]['longAccount']) if res_top else 0.5
-        
-        res_glob = requests.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1").json()
-        retail_ratio = float(res_glob[0]['longAccount']) if res_glob else 0.5
-        
+        # Not: Public API bazen veri vermeyebilir, bu durumda nötr (0.5) döneriz.
+        try:
+            res_top = requests.get("https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=5).json()
+            whale_ratio = float(res_top[0]['longAccount'])
+            
+            res_glob = requests.get("https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=BTCUSDT&period=5m&limit=1", timeout=5).json()
+            retail_ratio = float(res_glob[0]['longAccount'])
+        except:
+            whale_ratio, retail_ratio = 0.5, 0.5 # Veri yoksa Nötr
+            
         return price, change, whale_ratio, retail_ratio
     except:
         return 0, 0, 0.5, 0.5
 
 btc_price, btc_change, whale_long, retail_long = get_live_data()
 
-# --- 3. ARAYÜZ (SIDEBAR) ---
-st.sidebar.header("⚡ Simülatör Ayarları")
+# --- 3. SIDEBAR (KULLANICI GİRİŞLERİ) ---
+st.sidebar.header("⚡ Simülatör")
 
-# Listeleri Doldur
 analysts = sorted(list(engine.db['global'].keys()))
-# Coin listesini güvenli çek
-coins = []
-if hasattr(engine.db['coin'], 'keys'):
-    # Tuple keys (Analyst, Coin) -> Sadece Coinleri al
-    coins = sorted(list(set([k[1] for k in engine.db['coin'].keys()])))
+# Coin listesini temizle
+coins = sorted(list(set([k[1] for k in engine.db['coin'].keys()])))
 
-sel_analyst = st.sidebar.selectbox("Analist", analysts)
-sel_coin = st.sidebar.selectbox("Coin", coins)
-sel_pos = st.sidebar.selectbox("Yön", ["long", "short"])
+sel_analyst = st.sidebar.selectbox("Analist Seç", analysts)
+sel_coin = st.sidebar.selectbox("Coin Paritesi", coins)
+sel_pos = st.sidebar.selectbox("İşlem Yönü", ["long", "short"], format_func=lambda x: "LONG (Yükseliş)" if x=="long" else "SHORT (Düşüş)")
 sel_time = st.sidebar.time_input("İşlem Saati (TRT)", datetime.now().time())
 
 # --- 4. ANA EKRAN ---
-st.title("🛡️ BottomUP TradeGuard AI")
-st.caption("Live Whale Data & Historical Machine Learning Engine")
+st.title("🛡️ BottomUP TradeGuard")
+st.markdown(f"**Live Engine Status:** Connected to Binance | **Model:** AI-Driven v11.0")
 
-# Üst Bilgi Kartları
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("BTC Fiyat", f"${btc_price:,.0f}", f"{btc_change:.2f}%")
-col2.metric("Balina (Long)", f"%{whale_long*100:.1f}", delta_color="off")
-col3.metric("Retail (Long)", f"%{retail_long*100:.1f}", delta_color="off")
+# Metrik Kartları
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("BTC Fiyat", f"${btc_price:,.0f}", f"{btc_change:.2f}%")
+c2.metric("Balina (Long)", f"%{whale_long*100:.1f}", delta_color="off")
+c3.metric("Retail (Long)", f"%{retail_long*100:.1f}", delta_color="off")
+c4.metric("Model Verisi", f"{len(engine.db['global'])} Analist")
 
-# Hesaplama
+# --- 5. RİSK HESAPLAMA ---
 current_dt = datetime.combine(datetime.today(), sel_time)
-res = engine.predict_risk(
+
+# Engine'i çağır
+result = engine.predict_risk(
     analyst=sel_analyst,
     coin=sel_coin,
     trade_time_trt=current_dt,
@@ -93,42 +125,62 @@ res = engine.predict_risk(
     whale_global_ratio=retail_long
 )
 
-score = res['score']
-details = res['details']
+score = result['score']
+details = result['details']
 
-# Skor Gösterimi
+# --- 6. SONUÇ GÖRSELLEŞTİRME ---
 st.markdown("---")
-c_score, c_detail = st.columns([1, 2])
 
-with c_score:
-    st.markdown("<div style='text-align:center'>AI SKORU</div>", unsafe_allow_html=True)
-    color = "#FF4B4B" if score < 40 else ("#00E096" if score > 65 else "#FFD166")
-    st.markdown(f"<div class='big-font' style='text-align:center; color:{color}'>{score}</div>", unsafe_allow_html=True)
-    
-    lbl = "YÜKSEK RİSK" if score < 40 else ("GÜÇLÜ FIRSAT" if score > 65 else "NÖTR")
-    st.markdown(f"<div style='text-align:center; background:{color}33; color:{color}; padding:5px; border-radius:5px;'><b>{lbl}</b></div>", unsafe_allow_html=True)
+col_score, col_details = st.columns([1, 2])
 
-with c_detail:
-    st.subheader("📝 AI Karar Detayları")
+with col_score:
+    st.markdown("<div style='text-align:center' class='score-label'>BAŞARI OLASILIĞI</div>", unsafe_allow_html=True)
     
+    # Renk Kodları
+    if score < 40:
+        color = "#FF4B4B" # Kırmızı
+        bg_color = "rgba(255, 75, 75, 0.1)"
+        label = "YÜKSEK RİSK"
+    elif score > 65:
+        color = "#00E096" # Yeşil
+        bg_color = "rgba(0, 224, 150, 0.1)"
+        label = "GÜÇLÜ FIRSAT"
+    else:
+        color = "#FFD166" # Sarı
+        bg_color = "rgba(255, 209, 102, 0.1)"
+        label = "NÖTR / İZLE"
+
+    st.markdown(f"<div style='text-align:center; color:{color}' class='big-score'>{score}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center'><span class='badge' style='background:{bg_color}; color:{color}'>{label}</span></div>", unsafe_allow_html=True)
+
+with col_details:
+    st.subheader("🧠 Yapay Zeka Analiz Raporu")
+    
+    # Uyarılar
     if details['trap_alert']:
-        st.error(f"🛑 {details['trap_alert']}")
+        st.error(f"🕰️ {details['trap_alert']}")
     
     if details['trend_alert']:
-        if "TERSİ" in details['trend_alert']: st.warning(details['trend_alert'])
-        else: st.success(details['trend_alert'])
+        if "TERSİ" in details['trend_alert']: st.warning(f"📉 {details['trend_alert']}")
+        else: st.success(f"🚀 {details['trend_alert']}")
         
     if details['whale_alert']:
-        if "SMART" in details['whale_alert']: st.info(details['whale_alert'])
-        else: st.error(details['whale_alert'])
+        if "SMART" in details['whale_alert']: st.info(f"🐋 {details['whale_alert']}")
+        else: st.error(f"⚠️ {details['whale_alert']}")
         
-    st.write(f"**Geçmiş İstatistik:** Coin Başarısı {details['base_stats']['coin']} | Seans Başarısı {details['base_stats']['session']}")
+    st.markdown("---")
+    # İstatistik Detayı
+    s1, s2 = st.columns(2)
+    s1.info(f"**Coin Uyumu:** {details['base_stats']['coin']}")
+    s2.info(f"**Seans Uyumu:** {details['base_stats']['session']}")
 
-# Grafik
+# --- 7. GRAFİK ---
 st.markdown("---")
-st.subheader("📊 Model Ağırlıkları (v11)")
-labels = ['Coin Uyumu', 'Saat/Zaman', 'Analist', 'Gün', 'Trend/Balina (Live)']
-values = [40, 30, 20, 10, 30] # Dinamik kısımlar ekstra puan ekler
-fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.4)])
-fig.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0))
+st.caption("Model Karar Ağırlıkları (Backtest Optimize)")
+
+labels = ['Coin Uyumu (%40)', 'Zamanlama (%30)', 'Analist (%20)', 'Gün (%10)', 'Canlı Sinyaller (Dynamic)']
+values = [40, 30, 20, 10, 25] # Dinamik sinyaller ekstra etki eder
+
+fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=.5, marker_colors=['#2DE1FC', '#FF4B4B', '#F3BA2F', '#A0A0A0', '#7C3AED'])])
+fig.update_layout(height=250, margin=dict(t=0, b=0, l=0, r=0), paper_bgcolor='rgba(0,0,0,0)', font_color='#888')
 st.plotly_chart(fig, use_container_width=True)
